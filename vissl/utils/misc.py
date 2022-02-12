@@ -84,7 +84,7 @@ def is_apex_available():
 
 def is_augly_available():
     """
-    Check if apex is available with simple python imports.
+    Check if augly is available with simple python imports.
     """
     try:
         assert sys.version_info >= (
@@ -99,6 +99,19 @@ def is_augly_available():
     except (AssertionError, ImportError):
         augly_available = False
     return augly_available
+
+
+def is_pytorchvideo_available():
+    """
+    Check if pytorchvideo is available with simple python imports.
+    """
+    try:
+        import pytorchvideo  # NOQA
+
+        pytorchvideo_available = True
+    except ImportError:
+        pytorchvideo_available = False
+    return pytorchvideo_available
 
 
 def find_free_tcp_port():
