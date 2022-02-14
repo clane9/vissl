@@ -6,13 +6,14 @@
 import logging
 
 from iopath.common.file_io import g_pathmgr
-from vissl.data.video_folder import VideoFolder
-from vissl.data.data_helper import QueueDataset, get_mean_video
+from vissl.data.data_helper import QueueDataset
 from vissl.utils.io import load_file
 from vissl.utils.misc import is_pytorchvideo_available
 
 if is_pytorchvideo_available():
-    from pytorchvideo.data.video import VideoPathHandler, Video
+    from pytorchvideo.data.video import VideoPathHandler
+    from vissl.data.video_helper import get_mean_video
+    from vissl.data.video_folder import VideoFolder
 
 
 class DiskVideoDataset(QueueDataset):
@@ -26,20 +27,18 @@ class DiskVideoDataset(QueueDataset):
     valid and seen videos.
 
     TODO: Add support for replacing invalid videos from queue.
-    TODO: Implement a `VideoFolder` analogous to `ImageFolder`.
-    TODO: Do the sources need to be disk_video_filelist, disk_video_folder?
     TODO: Would it be better to add video cases to disk_dataset rather than a
     new dataset class? Maybe they'll diverge in the future. And also this is
     what was suggested.
 
     Args:
         cfg (AttrDict): configuration defined by user
-        data_source (string): data source either of "disk_filelist" or "disk_folder"
+        data_source (string): data source either of "disk_video_filelist" or "disk_video_folder"
         path (string): can be either of the following
             1. A .npy file containing a list of video filepaths or frame directories.
-               In this case `data_source = "disk_filelist"`
+               In this case `data_source = "disk_video_filelist"`
             2. A folder such that folder/split contains video filepaths or frame directories.
-               In this case `data_source = "disk_folder"`
+               In this case `data_source = "disk_video_folder"`
         split (string): specify split for the dataset.
                         Usually train/val/test.
                         Used to read videos if reading from a folder `path` and retrieve
@@ -63,12 +62,12 @@ class DiskVideoDataset(QueueDataset):
             queue_size=cfg["DATA"][split]["BATCHSIZE_PER_REPLICA"]
         )
         assert data_source in [
-            "disk_filelist",
-            "disk_folder",
-        ], "data_source must be either disk_filelist or disk_folder"
-        if data_source == "disk_filelist":
+            "disk_video_filelist",
+            "disk_video_folder",
+        ], "data_source must be either disk_video_filelist or disk_video_folder"
+        if data_source == "disk_video_filelist":
             assert g_pathmgr.isfile(path), f"File {path} does not exist"
-        elif data_source == "disk_folder":
+        elif data_source == "disk_video_folder":
             assert g_pathmgr.isdir(path), f"Directory {path} does not exist"
         self.cfg = cfg
         self.split = split
@@ -82,7 +81,7 @@ class DiskVideoDataset(QueueDataset):
         self._num_samples = len(self.video_dataset)
         self._remove_prefix = cfg["DATA"][self.split]["REMOVE_IMG_PATH_PREFIX"]
         self._new_prefix = cfg["DATA"][self.split]["NEW_IMG_PATH_PREFIX"]
-        if self.data_source in ["disk_filelist"]:
+        if self.data_source in ["disk_video_filelist"]:
             # Set dataset to null so that workers dont need to pickle this file.
             # This saves memory when disk_filelist is large, especially when memory mapping.
             self.video_dataset = []
@@ -96,12 +95,12 @@ class DiskVideoDataset(QueueDataset):
 
 
     def _load_data(self, path):
-        if self.data_source == "disk_filelist":
+        if self.data_source == "disk_video_filelist":
             if self.cfg["DATA"][self.split].MMAP_MODE:
                 self.video_dataset = load_file(path, mmap_mode="r")
             else:
                 self.video_dataset = load_file(path)
-        elif self.data_source == "disk_folder":
+        elif self.data_source == "disk_video_folder":
             self.video_dataset = VideoFolder(path)
             logging.info(f"Loaded {len(self.video_dataset)} samples from folder {path}")
 
@@ -121,7 +120,7 @@ class DiskVideoDataset(QueueDataset):
         Get paths of all images in the datasets. See load_data()
         """
         self._load_data(self._path)
-        if self.data_source == "disk_folder":
+        if self.data_source == "disk_video_folder":
             assert isinstance(self.video_dataset, VideoFolder)
             return [sample[0] for sample in self.video_dataset.samples]
         else:
@@ -156,29 +155,29 @@ class DiskVideoDataset(QueueDataset):
         if not self.queue_init and self.enable_queue_dataset:
             self._init_queues()
         is_success = True
-        video_path = self.video_dataset[idx]
         try:
-            if self.data_source == "disk_filelist":
+            if self.data_source == "disk_video_filelist":
+                video_path = self.video_dataset[idx]
                 video_path = self._replace_img_path_prefix(
                     video_path,
                     replace_prefix=self._remove_prefix,
                     new_prefix=self._new_prefix,
                 )
-                # TODO: maybe expose these as config options
+                # TODO: these defaults appear in a few places
                 video = self._video_path_handler.video_from_path(
                     video_path,
                     decode_audio=False,
                     decoder="pyav",
                     fps=30
                 )
-            elif self.data_source == "disk_folder":
+            elif self.data_source == "disk_video_folder":
+                video_path = self.video_dataset.samples[idx][0]
                 video = self.video_dataset[idx][0]
             if is_success and self.enable_queue_dataset:
                 self.on_sucess(video)
         except Exception as e:
-            # TODO: Couldn't this fail (again) for disk_folders?
             logging.warning(
-                f"Couldn't load: {self.video_dataset[idx]}. Exception: \n{e}"
+                f"Couldn't load: {video_path}. Exception: \n{e}"
             )
             is_success = False
             # if we have queue dataset class enabled, we try to use it to get

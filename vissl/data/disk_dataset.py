@@ -152,9 +152,9 @@ class DiskImageDataset(QueueDataset):
         if not self.queue_init and self.enable_queue_dataset:
             self._init_queues()
         is_success = True
-        image_path = self.image_dataset[idx]
         try:
             if self.data_source == "disk_filelist":
+                image_path = self.image_dataset[idx]
                 image_path = self._replace_img_path_prefix(
                     image_path,
                     replace_prefix=self._remove_prefix,
@@ -163,8 +163,10 @@ class DiskImageDataset(QueueDataset):
                 with g_pathmgr.open(image_path, "rb") as fopen:
                     img = Image.open(fopen).convert("RGB")
             elif self.data_source == "disk_folder":
+                image_path = self.image_dataset.samples[idx][0]
                 img = self.image_dataset[idx][0]
             elif self.data_source == "disk_roi_annotations":
+                image_path = self.image_dataset[idx]
                 with g_pathmgr.open(image_path, "rb") as fopen:
                     bbox = [float(item) for item in self.image_roi_bbox[idx]]
                     img = Image.open(fopen).crop(bbox).convert("RGB")
@@ -188,7 +190,7 @@ class DiskImageDataset(QueueDataset):
                 self.on_sucess(img)
         except Exception as e:
             logging.warning(
-                f"Couldn't load: {self.image_dataset[idx]}. Exception: \n{e}"
+                f"Couldn't load: {image_path}. Exception: \n{e}"
             )
             is_success = False
             # if we have queue dataset class enabled, we try to use it to get
