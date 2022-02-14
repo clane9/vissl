@@ -23,6 +23,8 @@ _TRANSFORMS_WITH_COPIES = [
     "ImgReplicatePil",
     "ImgPilToPatchesAndImage",
     "ImgPilToMultiCrop",
+    "GenericReplicate",
+    "VideoPtvToPilList",
 ]
 _TRANSFORMS_WITH_GROUPING = ["ImgPilMultiCropRandomApply"]
 _TRANSFORMS_WITH_OVERWRITE_ENTIRE_BATCH = ["OneHotEncode"]
@@ -167,6 +169,8 @@ class SSLTransformsWrapper(ClassyTransform):
             "ImgReplicatePil",
             "ImgPilToPatchesAndImage",
             "ImgPilToMultiCrop",
+            "GenericReplicate",
+            "VideoPtvToPilList",
         ]
         """
         return self.name in self.transforms_with_copies

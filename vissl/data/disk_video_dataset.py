@@ -10,10 +10,11 @@ from vissl.data.data_helper import QueueDataset
 from vissl.utils.io import load_file
 from vissl.utils.misc import is_pytorchvideo_available
 
+
 if is_pytorchvideo_available():
     from pytorchvideo.data.video import VideoPathHandler
-    from vissl.data.video_helper import get_mean_video
     from vissl.data.video_folder import VideoFolder
+    from vissl.data.video_helper import get_mean_video
 
 
 class DiskVideoDataset(QueueDataset):
@@ -25,11 +26,6 @@ class DiskVideoDataset(QueueDataset):
     Inherits from QueueDataset class in VISSL to provide better
     handling of the invalid videos by replacing them with the
     valid and seen videos.
-
-    TODO: Add support for replacing invalid videos from queue.
-    TODO: Would it be better to add video cases to disk_dataset rather than a
-    new dataset class? Maybe they'll diverge in the future. And also this is
-    what was suggested.
 
     Args:
         cfg (AttrDict): configuration defined by user
@@ -52,12 +48,16 @@ class DiskVideoDataset(QueueDataset):
     1. Store labels in a numpy file
     2. Store images in a nested directory structure so that torchvision ImageFolder
        dataset can infer the labels.
+
+    TODO: Would it be better to add video cases to disk_dataset rather than a
+    new dataset class? Maybe they'll diverge in the future. Maybe it's nice to
+    separate the video stuff from the more important image stuff.
     """
 
     def __init__(self, cfg, data_source, path, split, dataset_name):
-        assert is_pytorchvideo_available(), (
-            "pytorchvideo must be available to use DiskVideoDataset"
-        )
+        assert (
+            is_pytorchvideo_available()
+        ), "pytorchvideo must be available to use DiskVideoDataset"
         super(DiskVideoDataset, self).__init__(
             queue_size=cfg["DATA"][split]["BATCHSIZE_PER_REPLICA"]
         )
@@ -87,12 +87,12 @@ class DiskVideoDataset(QueueDataset):
             self.video_dataset = []
         # whether to use QueueDataset class to handle invalid images or not
         self.enable_queue_dataset = cfg["DATA"][self.split]["ENABLE_QUEUE_DATASET"]
+        # TODO: Possibly add support for replacing invalid videos from queue.
         if self.enable_queue_dataset:
             logging.warning(
                 "ENABLE_QUEUE_DATASET not supported for DiskVideoDataset; disabling."
             )
             self.enable_queue_dataset = False
-
 
     def _load_data(self, path):
         if self.data_source == "disk_video_filelist":
@@ -167,10 +167,7 @@ class DiskVideoDataset(QueueDataset):
                 )
                 # TODO: these defaults appear in a few places
                 video = self._video_path_handler.video_from_path(
-                    video_path,
-                    decode_audio=False,
-                    decoder="pyav",
-                    fps=30
+                    video_path, decode_audio=False, decoder="pyav", fps=30
                 )
             elif self.data_source == "disk_video_folder":
                 video_path = self.video_dataset.samples[idx][0]
@@ -178,9 +175,7 @@ class DiskVideoDataset(QueueDataset):
             if is_success and self.enable_queue_dataset:
                 self.on_sucess(video)
         except Exception as e:
-            logging.warning(
-                f"Couldn't load: {video_path}. Exception: \n{e}"
-            )
+            logging.warning(f"Couldn't load: {video_path}. Exception: \n{e}")
             is_success = False
             # if we have queue dataset class enabled, we try to use it to get
             # the seen valid images
@@ -188,9 +183,10 @@ class DiskVideoDataset(QueueDataset):
                 video, is_success = self.on_failure()
                 if video is None:
                     video = get_mean_video(
-                        self.cfg["DATA"][self.split].DEFAULT_GRAY_IMG_SIZE,
-                        fps=30
+                        self.cfg["DATA"][self.split].DEFAULT_GRAY_IMG_SIZE, fps=30
                     )
             else:
-                video = get_mean_video(self.cfg["DATA"][self.split].DEFAULT_GRAY_IMG_SIZE, fps=30)
+                video = get_mean_video(
+                    self.cfg["DATA"][self.split].DEFAULT_GRAY_IMG_SIZE, fps=30
+                )
         return video, is_success

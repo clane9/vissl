@@ -3,8 +3,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Optional, Dict
 import math
+from typing import Dict, Optional
 
 import torch
 from pytorchvideo.data.video import Video
@@ -34,11 +34,8 @@ class GrayVideo(Video):
         heigh (int): frame height
         fps (float): frames per second
     """
-    def __init__(self,
-        width: int,
-        height: int,
-        fps: float
-    ):
+
+    def __init__(self, width: int, height: int, fps: float):
         self.width = width
         self.height = height
         self.fps = fps
@@ -69,6 +66,7 @@ class GrayVideo(Video):
         if num_frames <= 0:
             return {"video": None, "audio": None}
 
-        video = torch.full((3, num_frames, self.height, self.width), 128.0,
-            dtype=torch.float32)
+        video = torch.full(
+            (3, num_frames, self.height, self.width), 128.0, dtype=torch.float32
+        )
         return {"video": video, "audio": None}
