@@ -220,16 +220,18 @@ class GenericSSLDataset(VisslDatasetBase):
         pre-training task, we don't use labels. However, we use labels for the
         evaluations of the self-supervised models on the downstream tasks.
 
-        For labels, two label sources are supported: disk_filelist and disk_folder
+        For labels, the supported label sources are: disk_filelist, disk_folder
+        and their video counterparts disk_video_filelist, disk_video_folder.
 
         In case of disk_filelist, we iteratively read labels for each specified file.
         See load_single_label_file().
         In case of disk_folder, we use the ImageFolder object created during the
         data loading itself.
+        The video counterparts are handled similarly.
         """
         local_rank, _ = get_machine_local_and_dist_rank()
         for idx, label_source in enumerate(self.label_sources):
-            if label_source == "disk_filelist":
+            if label_source in ["disk_filelist", "disk_video_filelist"]:
                 paths = self.label_paths[idx]
                 # in case of filelist, we support multiple label files.
                 # we rely on the user to have a proper collator to handle
@@ -243,7 +245,7 @@ class GenericSSLDataset(VisslDatasetBase):
                 else:
                     labels = self.load_single_label_file(paths)
                     labels = self._convert_to_numeric_ids(labels)
-            elif label_source == "disk_folder":
+            elif label_source in ["disk_folder", "disk_video_folder"]:
                 # In this case we use the labels inferred from the directory structure
                 # We enforce that the data source also be a disk folder in this case
                 assert self.data_sources[idx] == self.label_sources[idx]

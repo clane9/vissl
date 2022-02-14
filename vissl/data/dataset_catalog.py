@@ -26,7 +26,8 @@ class VisslDatasetCatalog(object):
     e.g. "imagenet1k") to a `dict` which contains:
         1) mapping of various data splits (train, test, val) to the data source
            (path on the disk whether a folder path or a filelist)
-        2) source of the data (disk_filelist | disk_folder | disk_roi_annotations)
+        2) source of the data (disk_filelist | disk_folder |
+           disk_roi_annotations | disk_video_filelist | disk_video_folder)
     The purpose of having this catalog is to make it easy to choose different datasets,
     by just using the strings in the config.
     """

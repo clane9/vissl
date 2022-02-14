@@ -108,6 +108,8 @@ class DiskVideoDataset(QueueDataset):
             # Creating VideoFolder dataset can be expensive because of repeated os.listdir calls
             # Avoid creating it over and over again.
             self.is_initialized = True
+        # alias for consistent access
+        self.image_dataset = self.video_dataset
 
     def num_samples(self):
         """
