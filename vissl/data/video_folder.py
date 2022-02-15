@@ -95,9 +95,6 @@ class VideoFolder(DatasetFolder):
 
         self.samples = self.merge_samples(self.samples)
         self.targets = [s[1] for s in self.samples]
-        self._has_encoded_videos = has_file_allowed_extension(
-            self.samples[0][0], VIDEO_EXTENSIONS
-        )
 
     @staticmethod
     def merge_samples(samples: List[Tuple[str, int]]) -> List[Tuple[str, int]]:
