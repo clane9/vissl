@@ -23,7 +23,6 @@ from vissl.data.dataset_catalog import (
     register_datasets,
 )
 from vissl.data.disk_dataset import DiskImageDataset
-from vissl.data.disk_video_dataset import DiskVideoDataset
 from vissl.data.ssl_dataset import GenericSSLDataset
 from vissl.data.synthetic_dataset import SyntheticImageDataset
 from vissl.data.torchvision_dataset import TorchvisionDataset
@@ -45,8 +44,8 @@ DATASET_SOURCE_MAP = {
     "disk_roi_annotations": DiskImageDataset,
     "torchvision_dataset": TorchvisionDataset,
     "synthetic": SyntheticImageDataset,
-    "disk_video_filelist": DiskVideoDataset,
-    "disk_video_folder": DiskVideoDataset,
+    "disk_video_filelist": DiskImageDataset,
+    "disk_video_folder": DiskImageDataset,
 }
 
 

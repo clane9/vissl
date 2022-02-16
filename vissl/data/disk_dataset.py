@@ -7,14 +7,21 @@ import logging
 
 from iopath.common.file_io import g_pathmgr
 from PIL import Image
-from torchvision.datasets import ImageFolder
+from torchvision.datasets import DatasetFolder, ImageFolder
 from vissl.data.data_helper import QueueDataset, get_mean_image
 from vissl.utils.io import load_file
+from vissl.utils.misc import is_pytorchvideo_available
+
+
+if is_pytorchvideo_available():
+    from pytorchvideo.data.video import VideoPathHandler
+    from vissl.data.video_folder import VideoFolder
+    from vissl.data.video_helper import get_mean_video
 
 
 class DiskImageDataset(QueueDataset):
     """
-    Base Dataset class for loading images from Disk.
+    Base Dataset class for loading images or videos from Disk.
     Can load a predefined list of images or all images inside
     a folder. And also a json file containing the image path
     and the RoI annotation for the image.
@@ -25,12 +32,14 @@ class DiskImageDataset(QueueDataset):
 
     Args:
         cfg (AttrDict): configuration defined by user
-        data_source (string): data source either of "disk_filelist" or "disk_folder"
+        data_source (string): data source either of "disk_filelist",
+            "disk_folder", "disk_roi_annotations", "disk_video_filelist", or
+            "disk_video_folder"
         path (string): can be either of the following
             1. A .npy file containing a list of filepaths.
-               In this case `data_source = "disk_filelist"`
+               In this case `data_source in ["disk_filelist", "disk_video_filelist"]`
             2. A folder such that folder/split contains images.
-               In this case `data_source = "disk_folder"`
+               In this case `data_source in ["disk_folder", "disk_video_folder"]`
             3. A .json file containing list of dictionary where
                each dictionary has "img_path" and "bbox" entry.
                In this case `data_source = "disk_roi_annotations"`
@@ -57,14 +66,23 @@ class DiskImageDataset(QueueDataset):
             "disk_filelist",
             "disk_folder",
             "disk_roi_annotations",
-        ], "data_source must be either disk_filelist or disk_folder"
-        if data_source == "disk_filelist":
+            "disk_video_filelist",
+            "disk_video_folder",
+        ], (
+            "data_source must be either disk_filelist, disk_folder, "
+            "disk_roi_annotations, disk_video_filelist, or disk_video_folder"
+        )
+        if data_source in ["disk_filelist", "disk_video_filelist"]:
             assert g_pathmgr.isfile(path), f"File {path} does not exist"
-        elif data_source == "disk_folder":
+        elif data_source in ["disk_folder", "disk_video_folder"]:
             assert g_pathmgr.isdir(path), f"Directory {path} does not exist"
         elif data_source == "disk_roi_annotations":
             assert g_pathmgr.isfile(path), f"File {path} does not exist"
             assert path.endswith("json"), "Annotations must be in json format"
+        if data_source in ["disk_video_filelist", "disk_video_folder"]:
+            assert (
+                is_pytorchvideo_available()
+            ), "pytorchvideo required for video data sources"
         self.cfg = cfg
         self.split = split
         self.dataset_name = dataset_name
@@ -73,20 +91,32 @@ class DiskImageDataset(QueueDataset):
         self.image_dataset = []
         self.image_roi_bbox = []
         self.is_initialized = False
+        self.is_video = data_source in ["disk_video_filelist", "disk_video_folder"]
+        self._video_path_handler = VideoPathHandler() if self.is_video else None
         self._load_data(path)
         self._num_samples = len(self.image_dataset)
         self._remove_prefix = cfg["DATA"][self.split]["REMOVE_IMG_PATH_PREFIX"]
         self._new_prefix = cfg["DATA"][self.split]["NEW_IMG_PATH_PREFIX"]
-        if self.data_source in ["disk_filelist", "disk_roi_annotations"]:
+        if self.data_source in [
+            "disk_filelist",
+            "disk_video_filelist",
+            "disk_roi_annotations",
+        ]:
             # Set dataset to null so that workers dont need to pickle this file.
             # This saves memory when disk_filelist is large, especially when memory mapping.
             self.image_dataset = []
             self.image_roi_bbox = []
         # whether to use QueueDataset class to handle invalid images or not
         self.enable_queue_dataset = cfg["DATA"][self.split]["ENABLE_QUEUE_DATASET"]
+        # TODO: Possibly add support for replacing invalid videos from queue.
+        if self.is_video:
+            logging.warning(
+                "ENABLE_QUEUE_DATASET not supported for video data sources; disabling."
+            )
+            self.enable_queue_dataset = False
 
     def _load_data(self, path):
-        if self.data_source == "disk_filelist":
+        if self.data_source in ["disk_filelist", "disk_video_filelist"]:
             if self.cfg["DATA"][self.split].MMAP_MODE:
                 self.image_dataset = load_file(path, mmap_mode="r")
             else:
@@ -98,6 +128,12 @@ class DiskImageDataset(QueueDataset):
             # mark as initialized.
             # Creating ImageFolder dataset can be expensive because of repeated os.listdir calls
             # Avoid creating it over and over again.
+            self.is_initialized = True
+        elif self.data_source == "disk_video_folder":
+            self.image_dataset = VideoFolder(path)
+            logging.info(
+                f"Loaded {len(self.image_dataset)} video samples from folder {path}"
+            )
             self.is_initialized = True
         elif self.data_source == "disk_roi_annotations":
             # we load the annotations and then parse the image paths and the image roi
@@ -117,8 +153,8 @@ class DiskImageDataset(QueueDataset):
         Get paths of all images in the datasets. See load_data()
         """
         self._load_data(self._path)
-        if self.data_source == "disk_folder":
-            assert isinstance(self.image_dataset, ImageFolder)
+        if self.data_source in ["disk_folder", "disk_video_folder"]:
+            assert isinstance(self.image_dataset, DatasetFolder)
             return [sample[0] for sample in self.image_dataset.samples]
         else:
             return self.image_dataset
@@ -153,16 +189,15 @@ class DiskImageDataset(QueueDataset):
             self._init_queues()
         is_success = True
         try:
-            if self.data_source == "disk_filelist":
+            if self.data_source in ["disk_filelist", "disk_video_filelist"]:
                 image_path = self.image_dataset[idx]
                 image_path = self._replace_img_path_prefix(
                     image_path,
                     replace_prefix=self._remove_prefix,
                     new_prefix=self._new_prefix,
                 )
-                with g_pathmgr.open(image_path, "rb") as fopen:
-                    img = Image.open(fopen).convert("RGB")
-            elif self.data_source == "disk_folder":
+                img = self._load_image(image_path)
+            elif self.data_source in ["disk_folder", "disk_video_folder"]:
                 image_path = self.image_dataset.samples[idx][0]
                 img = self.image_dataset[idx][0]
             elif self.data_source == "disk_roi_annotations":
@@ -191,14 +226,32 @@ class DiskImageDataset(QueueDataset):
         except Exception as e:
             logging.warning(f"Couldn't load: {image_path}. Exception: \n{e}")
             is_success = False
+            img = None
             # if we have queue dataset class enabled, we try to use it to get
             # the seen valid images
             if self.enable_queue_dataset:
                 img, is_success = self.on_failure()
-                if img is None:
-                    img = get_mean_image(
-                        self.cfg["DATA"][self.split].DEFAULT_GRAY_IMG_SIZE
-                    )
-            else:
-                img = get_mean_image(self.cfg["DATA"][self.split].DEFAULT_GRAY_IMG_SIZE)
+            if img is None:
+                img = self._get_mean_image()
         return img, is_success
+
+    def _load_image(self, image_path):
+        assert self.data_source in ["disk_filelist", "disk_video_filelist"]
+
+        if self.data_source == "disk_filelist":
+            with g_pathmgr.open(image_path, "rb") as fopen:
+                img = Image.open(fopen).convert("RGB")
+        elif self.data_source == "disk_video_filelist":
+            img = self._video_path_handler.video_from_path(
+                image_path, decode_audio=False, decoder="pyav", fps=30
+            )
+        return img
+
+    def _get_mean_image(self):
+        if self.is_video:
+            img = get_mean_video(
+                self.cfg["DATA"][self.split].DEFAULT_GRAY_IMG_SIZE, fps=30
+            )
+        else:
+            img = get_mean_image(self.cfg["DATA"][self.split].DEFAULT_GRAY_IMG_SIZE)
+        return img
