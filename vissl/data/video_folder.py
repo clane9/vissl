@@ -6,26 +6,15 @@
 import os
 from typing import Any, Callable, List, Optional, Tuple
 
-from pytorchvideo.data.video import Video, VideoPathHandler
 from torchvision.datasets.folder import (
     IMG_EXTENSIONS,
     DatasetFolder,
     has_file_allowed_extension,
 )
+from vissl.data.video_helper import video_loader
 
 
 VIDEO_EXTENSIONS = ("avi", "mp4")
-
-
-def video_loader(path: str, decode_audio=False, decoder="pyav", fps=30) -> Video:
-    """
-    Default loader for videos.
-    """
-    handler = VideoPathHandler()
-    vid = handler.video_from_path(
-        path, decode_audio=decode_audio, decoder=decoder, fps=fps
-    )
-    return vid
 
 
 class VideoFolder(DatasetFolder):
@@ -64,16 +53,6 @@ class VideoFolder(DatasetFolder):
         classes (list): List of the class names sorted alphabetically.
         class_to_idx (dict): Dict with items (class_name, class_index).
         samples (list): List of (video path, class_index) tuples
-
-    NOTE: This dataset is similar to `LabeledVideoDataset` in pytorchvideo. The
-    key differences are:
-        1) `VideoFolder` is a map-style dataset, consistent with `ImageFolder`.
-            `LabeledVideoDataset` is iterable-style.
-        2) `LabeledVideoPaths.from_directory` doesn't seem to support frame
-            directories.
-        3) `LabeledVideoDataset` supports integrated clip sampling, which in
-            particular enables more efficient data reuse. `VideoFolder` doesn't
-            handle clipping.
     """
 
     def __init__(

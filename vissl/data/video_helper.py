@@ -7,7 +7,18 @@ import math
 from typing import Dict, Optional
 
 import torch
-from pytorchvideo.data.video import Video
+from pytorchvideo.data.video import Video, VideoPathHandler
+
+
+def video_loader(path: str, decode_audio=False, decoder="pyav", fps=30) -> Video:
+    """
+    Default loader for videos.
+    """
+    handler = VideoPathHandler()
+    vid = handler.video_from_path(
+        path, decode_audio=decode_audio, decoder=decoder, fps=fps
+    )
+    return vid
 
 
 def get_mean_video(crop_size, fps=30.0):

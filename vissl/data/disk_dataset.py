@@ -8,15 +8,14 @@ import logging
 from iopath.common.file_io import g_pathmgr
 from PIL import Image
 from torchvision.datasets import DatasetFolder, ImageFolder
-from vissl.data.data_helper import QueueDataset, get_mean_image
+from vissl.data.data_helper import QueueDataset, get_mean_image, image_loader
 from vissl.utils.io import load_file
 from vissl.utils.misc import is_pytorchvideo_available
 
 
 if is_pytorchvideo_available():
-    from pytorchvideo.data.video import VideoPathHandler
     from vissl.data.video_folder import VideoFolder
-    from vissl.data.video_helper import get_mean_video
+    from vissl.data.video_helper import get_mean_video, video_loader
 
 
 class DiskImageDataset(QueueDataset):
@@ -91,8 +90,6 @@ class DiskImageDataset(QueueDataset):
         self.image_dataset = []
         self.image_roi_bbox = []
         self.is_initialized = False
-        self.is_video = data_source in ["disk_video_filelist", "disk_video_folder"]
-        self._video_path_handler = VideoPathHandler() if self.is_video else None
         self._load_data(path)
         self._num_samples = len(self.image_dataset)
         self._remove_prefix = cfg["DATA"][self.split]["REMOVE_IMG_PATH_PREFIX"]
@@ -106,10 +103,16 @@ class DiskImageDataset(QueueDataset):
             # This saves memory when disk_filelist is large, especially when memory mapping.
             self.image_dataset = []
             self.image_roi_bbox = []
+        if data_source in ["disk_video_filelist", "disk_video_folder"]:
+            self._load_image = video_loader
+            self._get_mean_image = get_mean_video
+        else:
+            self._load_image = image_loader
+            self._get_mean_image = get_mean_image
         # whether to use QueueDataset class to handle invalid images or not
         self.enable_queue_dataset = cfg["DATA"][self.split]["ENABLE_QUEUE_DATASET"]
         # TODO: Possibly add support for replacing invalid videos from queue.
-        if self.is_video:
+        if data_source in ["disk_video_filelist", "disk_video_folder"]:
             logging.warning(
                 "ENABLE_QUEUE_DATASET not supported for video data sources; disabling."
             )
@@ -232,24 +235,7 @@ class DiskImageDataset(QueueDataset):
             if self.enable_queue_dataset:
                 img, is_success = self.on_failure()
             if img is None:
-                img = self._get_mean_image()
+                img = self._get_mean_image(
+                    self.cfg["DATA"][self.split].DEFAULT_GRAY_IMG_SIZE
+                )
         return img, is_success
-
-    def _load_image(self, image_path):
-        if self.is_video:
-            img = self._video_path_handler.video_from_path(
-                image_path, decode_audio=False, decoder="pyav", fps=30
-            )
-        else:
-            with g_pathmgr.open(image_path, "rb") as fopen:
-                img = Image.open(fopen).convert("RGB")
-        return img
-
-    def _get_mean_image(self):
-        if self.is_video:
-            img = get_mean_video(
-                self.cfg["DATA"][self.split].DEFAULT_GRAY_IMG_SIZE, fps=30
-            )
-        else:
-            img = get_mean_image(self.cfg["DATA"][self.split].DEFAULT_GRAY_IMG_SIZE)
-        return img

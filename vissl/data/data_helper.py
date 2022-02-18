@@ -9,9 +9,19 @@ import queue
 
 import numpy as np
 import torch
+from iopath.common.file_io import g_pathmgr
 from PIL import Image
 from torch.utils.data import Dataset
 from torch.utils.data.distributed import DistributedSampler
+
+
+def image_loader(image_path):
+    """
+    Default loader for images.
+    """
+    with g_pathmgr.open(image_path, "rb") as fopen:
+        img = Image.open(fopen).convert("RGB")
+    return img
 
 
 def get_mean_image(crop_size):
