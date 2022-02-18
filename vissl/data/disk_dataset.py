@@ -236,15 +236,13 @@ class DiskImageDataset(QueueDataset):
         return img, is_success
 
     def _load_image(self, image_path):
-        assert self.data_source in ["disk_filelist", "disk_video_filelist"]
-
-        if self.data_source == "disk_filelist":
-            with g_pathmgr.open(image_path, "rb") as fopen:
-                img = Image.open(fopen).convert("RGB")
-        elif self.data_source == "disk_video_filelist":
+        if self.is_video:
             img = self._video_path_handler.video_from_path(
                 image_path, decode_audio=False, decoder="pyav", fps=30
             )
+        else:
+            with g_pathmgr.open(image_path, "rb") as fopen:
+                img = Image.open(fopen).convert("RGB")
         return img
 
     def _get_mean_image(self):
