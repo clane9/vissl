@@ -11,6 +11,7 @@ from collections import namedtuple
 import torch
 from classy_vision.losses import ClassyLoss, register_loss
 from torch import nn
+from vissl.losses.memory_bank import MemoryBank
 from vissl.utils.misc import concat_all_gather
 
 
@@ -49,13 +50,10 @@ class MoCoLoss(ClassyLoss):
         self.loss_config = config
 
         # Create the queue
-        self.register_buffer(
-            "queue",
-            torch.randn(self.loss_config.embedding_dim, self.loss_config.queue_size),
+        self.queue = MemoryBank(
+            self.loss_config.embedding_dim, self.loss_config.queue_size
         )
-        self.queue = nn.functional.normalize(self.queue, dim=0)
 
-        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
         self.criterion = nn.CrossEntropyLoss()
         self.initialized = False
 
@@ -77,34 +75,6 @@ class MoCoLoss(ClassyLoss):
             MoCoLoss instance.
         """
         return cls(config)
-
-    @torch.no_grad()
-    def _dequeue_and_enqueue(self, key: torch.Tensor):
-        """
-        Discard the oldest key from the MoCo queue, save the newest one,
-        through a round-robin mechanism
-        """
-
-        # gather keys before updating queue /!\ the queue is duplicated on all GPUs
-        keys = concat_all_gather(key)
-        batch_size = keys.shape[0]
-
-        # for simplicity, removes the case where the batch overlaps with the end
-        # of the queue
-        assert self.loss_config.queue_size % batch_size == 0, (
-            f"The queue size needs to be a multiple of the batch size. "
-            f"Effective batch size: {batch_size}. Queue size:"
-            f" {self.loss_config.queue_size}."
-        )
-
-        # replace the keys at ptr (dequeue and enqueue)
-        ptr = int(self.queue_ptr)
-        self.queue[:, ptr : ptr + batch_size] = keys.T
-        ptr = (
-            ptr + batch_size
-        ) % self.loss_config.queue_size  # move pointer, round robin
-
-        self.queue_ptr[0] = ptr
 
     def forward(self, query: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
@@ -135,7 +105,7 @@ class MoCoLoss(ClassyLoss):
         l_pos = torch.einsum("nc,nc->n", [query, self.key]).unsqueeze(-1)
 
         # negative logits: NxK
-        l_neg = torch.einsum("nc,ck->nk", [query, self.queue.clone().detach()])
+        l_neg = self.queue.dot(query)
 
         # logits: Nx(1+K)
         logits = torch.cat([l_pos, l_neg], dim=1)
@@ -149,7 +119,9 @@ class MoCoLoss(ClassyLoss):
 
         # ---
         # Update the queue for the next time
-        self._dequeue_and_enqueue(self.key)
+        # gather keys before updating queue /!\ the queue is duplicated on all GPUs
+        keys = concat_all_gather(self.key)
+        self.queue.dequeue_and_enqueue(keys)
 
         # ---
         # Then just apply the XELoss
