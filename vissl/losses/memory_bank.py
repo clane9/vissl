@@ -28,7 +28,7 @@ class MemoryBank(nn.Module):
 
         self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
 
-    def dot(self, query: Tensor, normalize: bool = False) -> Tensor:
+    def forward(self, query: Tensor, normalize: bool = False) -> Tensor:
         """
         Pairwise comparison between query `(n, d)` and the full memory bank.
         Returns a matrix if similarities `(n, K)` where `n` and `K` are the
@@ -38,7 +38,7 @@ class MemoryBank(nn.Module):
             query = nn.functional.normalize(query, dim=1)
         return torch.matmul(query, self.queue)
 
-    forward = dot
+    dot = forward
 
     @torch.no_grad()
     def neighbors(
