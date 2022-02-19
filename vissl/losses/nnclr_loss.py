@@ -124,8 +124,8 @@ class NNCLRLoss(ClassyLoss):
         # update queue using only one view, following original authors.
         # gather keys before updating queue /!\ the queue is duplicated on all GPUs
         if has_pred:
-            proj_1, _ = torch.chunk(proj, 2)
-            proj_1s = concat_all_gather(proj_1.detach())
+            proj_1, _ = torch.chunk(proj.detach(), 2)
+            proj_1s = concat_all_gather(proj_1)
             self.queue.dequeue_and_enqueue(proj_1s)
         else:
             # pred is proj

@@ -12,7 +12,7 @@ from torch import Tensor, nn
 class MemoryBank(nn.Module):
     """
     A memory bank i.e. queue for storing and querying recent embedded
-    representations. Supports all-to-all comparison and nearest neighbor queries.
+    representations. Supports pairwise comparison and nearest neighbor queries.
     Also introduces random walk queries, which are a natural but untested
     generalization of nearest neighbor queries. Used in SSL methods like MoCo
     and NNCLR.
@@ -52,7 +52,7 @@ class MemoryBank(nn.Module):
         # (n, k)
         values, indices = torch.topk(sim, k, dim=1)
         # (n, k, d)
-        neighbors = self.queue[indices, :]
+        neighbors = self.queue.T[indices, :]
         return neighbors, values
 
     @torch.no_grad()
@@ -81,7 +81,7 @@ class MemoryBank(nn.Module):
         if normalize:
             query = nn.functional.normalize(query, dim=1)
 
-        for _ in range(steps):
+        for step in range(steps):
             neighbors, sim = self.neighbors(query, k)
             if k == 1:
                 query = neighbors[:, 0, :]
@@ -89,9 +89,11 @@ class MemoryBank(nn.Module):
                 k = k + 1
                 continue
 
-            # prevent cyclic transitions
-            identity_mask = sim >= 1.0 - 1e-6
-            sim[identity_mask] = -1e6
+            # prevent cyclic transitions, since query now belongs to queue
+            if step > 0:
+                sim[:, 0] = -float("Inf")
+
+            # take step
             prob = torch.softmax(sim / temperature, dim=1)
             indices = torch.multinomial(prob, 1).squeeze(1)
             query = neighbors[torch.arange(query.size(0)), indices]

@@ -6,7 +6,8 @@
 from typing import List, Union
 
 import torch
-from vissl.models.heads import MLP, register_model_head
+from vissl.models.heads import register_model_head
+from vissl.models.heads.mlp import MLP
 
 
 @register_model_head("skip_mlp")
