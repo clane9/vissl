@@ -43,6 +43,7 @@ class NNCLRLoss(ClassyLoss):
             self.loss_config.embedding_dim, self.loss_config.queue_size
         )
 
+        self.dist_rank = get_rank()
         self.criterion = nn.CrossEntropyLoss()
         self.initialized = False
 
@@ -72,8 +73,7 @@ class NNCLRLoss(ClassyLoss):
             # no prediction head
             pred = proj = output
 
-        rank = get_rank()
-        batch_size = proj.shape[0]
+        orig_images = proj.shape[0] // 2
         device = proj.device
 
         if not self.initialized:
@@ -99,8 +99,12 @@ class NNCLRLoss(ClassyLoss):
         nbrs_2s = concat_all_gather(nbrs_2)
 
         # each replica computes the loss for its assigned batch
-        rows = slice(rank * batch_size, (rank + 1) * batch_size)
-        labels = torch.arange(rank * batch_size, (rank + 1) * batch_size, device=device)
+        rows = slice(self.dist_rank * orig_images, (self.dist_rank + 1) * orig_images)
+        labels = torch.arange(
+            self.dist_rank * orig_images,
+            (self.dist_rank + 1) * orig_images,
+            device=device,
+        )
 
         # similarities between nearest neighbors and predictions
         # transpose similarities are included to symmetrize the loss
