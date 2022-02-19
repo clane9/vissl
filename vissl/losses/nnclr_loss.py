@@ -11,6 +11,7 @@ from classy_vision.losses import ClassyLoss, register_loss
 from torch import nn
 from vissl.config import AttrDict
 from vissl.losses.memory_bank import MemoryBank
+from vissl.utils.distributed_utils import gather_from_all
 from vissl.utils.misc import concat_all_gather
 
 
@@ -71,8 +72,9 @@ class NNCLRLoss(ClassyLoss):
             pred = nn.functional.normalize(pred, dim=1)
             proj = nn.functional.normalize(proj, dim=1)
 
+        device = proj.device
         if not self.initialized:
-            self.queue = self.queue.to(proj.device)
+            self.queue = self.queue.to(device)
             self.initialized = True
 
         # note, nearest neighbor query also stops gradients
@@ -83,19 +85,37 @@ class NNCLRLoss(ClassyLoss):
         pred_1, pred_2 = torch.chunk(pred, 2)
         nbrs_1, nbrs_2 = torch.chunk(nbrs, 2)
 
+        # TODO: This is a lot of communication and redundant computation. Think
+        # about how to partition better.
+        #
+        # It would seem you at least need to gather all outputs, since each term
+        # appears in the softmax normalization.
+        #
+        # You could relax on computing the full loss in each replica, by slicing
+        # in the batch dimension before each of the multiplies. This could be
+        # worth it for large-scale training.
+
+        # gather all outputs, keeping grads for predicitons
+        # each replica computes a full loss
+        pred_1s = gather_from_all(pred_1)
+        pred_2s = gather_from_all(pred_2)
+        nbrs_1s = concat_all_gather(nbrs_1)
+        nbrs_2s = concat_all_gather(nbrs_2)
+
         # similarities between nearest neighbors and predictions
-        sim_1_2 = torch.matmul(nbrs_1, pred_2) / self.loss_config.temperature
-        sim_2_1 = torch.matmul(nbrs_2, pred_1) / self.loss_config.temperature
+        sim_1_2 = torch.matmul(nbrs_1s, pred_2s) / self.loss_config.temperature
+        sim_2_1 = torch.matmul(nbrs_2s, pred_1s) / self.loss_config.temperature
 
         # transpose similarities are included to symmetrize the loss
         # see Section 3.2 Implementation details, and also keras example:
         # https://github.com/keras-team/keras-io/blob/master/examples/vision/nnclr.py
         logits = torch.cat([sim_1_2, sim_1_2.T, sim_2_1, sim_2_1.T])
-        labels = torch.tile(torch.arange(proj.shape[0], device=proj.device), (4,))
+        labels = torch.tile(torch.arange(pred_1s.shape[0], device=device), (4,))
 
         # update queue using only one view, following original authors.
+        # gather keys before updating queue /!\ the queue is duplicated on all GPUs
         proj_1, _ = torch.chunk(proj, 2)
-        proj_1s = concat_all_gather(proj_1)
+        proj_1s = concat_all_gather(proj_1.detach())
         self.queue.dequeue_and_enqueue(proj_1s)
 
         return self.criterion(logits, labels)
