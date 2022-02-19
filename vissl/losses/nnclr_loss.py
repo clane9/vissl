@@ -7,6 +7,7 @@ import pprint
 from typing import List, Union
 
 import torch
+from classy_vision.generic.distributed_util import get_rank
 from classy_vision.losses import ClassyLoss, register_loss
 from torch import nn
 from vissl.config import AttrDict
@@ -61,64 +62,72 @@ class NNCLRLoss(ClassyLoss):
     def forward(
         self, output: Union[List[torch.Tensor], torch.Tensor], *args, **kwargs
     ) -> torch.Tensor:
-        if isinstance(output, torch.Tensor):
-            # no prediction head
-            pred = proj = output
-            proj = nn.functional.normalize(proj, dim=1)
-        else:
+
+        has_pred = isinstance(output, (list, tuple))
+        if has_pred:
             # final prediction head is a SkipMLP which returns [output, input]
             # pred is final output, proj is input i.e. projection output
             pred, proj = output
-            pred = nn.functional.normalize(pred, dim=1)
-            proj = nn.functional.normalize(proj, dim=1)
+        else:
+            # no prediction head
+            pred = proj = output
 
+        rank = get_rank()
+        batch_size = proj.shape[0]
         device = proj.device
+
         if not self.initialized:
             self.queue = self.queue.to(device)
             self.initialized = True
+
+        proj = nn.functional.normalize(proj, dim=1)
+        if has_pred:
+            pred = nn.functional.normalize(pred, dim=1)
 
         # note, nearest neighbor query also stops gradients
         nbrs = self.queue.nearest_neighbor(proj.detach())
 
         # split according to the two views
-        # TODO: assuming only two views. assert somewhere.
         pred_1, pred_2 = torch.chunk(pred, 2)
         nbrs_1, nbrs_2 = torch.chunk(nbrs, 2)
 
-        # TODO: This is a lot of communication and redundant computation. Think
-        # about how to partition better.
-        #
-        # It would seem you at least need to gather all outputs, since each term
-        # appears in the softmax normalization.
-        #
-        # You could relax on computing the full loss in each replica, by slicing
-        # in the batch dimension before each of the multiplies. This could be
-        # worth it for large-scale training.
-
         # gather all outputs, keeping grads for predicitons
-        # each replica computes a full loss
+        # note all outputs must be gathered, since each term is used as negative examples
         pred_1s = gather_from_all(pred_1)
         pred_2s = gather_from_all(pred_2)
         nbrs_1s = concat_all_gather(nbrs_1)
         nbrs_2s = concat_all_gather(nbrs_2)
 
-        # similarities between nearest neighbors and predictions
-        sim_1_2 = torch.matmul(nbrs_1s, pred_2s) / self.loss_config.temperature
-        sim_2_1 = torch.matmul(nbrs_2s, pred_1s) / self.loss_config.temperature
+        # each replica computes the loss for its assigned batch
+        rows = slice(rank * batch_size, (rank + 1) * batch_size)
+        labels = torch.arange(rank * batch_size, (rank + 1) * batch_size, device=device)
 
+        # similarities between nearest neighbors and predictions
         # transpose similarities are included to symmetrize the loss
         # see Section 3.2 Implementation details, and also keras example:
         # https://github.com/keras-team/keras-io/blob/master/examples/vision/nnclr.py
-        logits = torch.cat([sim_1_2, sim_1_2.T, sim_2_1, sim_2_1.T])
-        labels = torch.tile(torch.arange(pred_1s.shape[0], device=device), (4,))
+        sim_1_1_2 = torch.matmul(nbrs_1s[rows], pred_2s.T)
+        sim_1_2_1 = torch.matmul(nbrs_2s[rows], pred_1s.T)
+        sim_2_1_2 = torch.matmul(pred_1s[rows], nbrs_2s.T)
+        sim_2_2_1 = torch.matmul(pred_2s[rows], nbrs_1s.T)
+
+        logits = torch.cat([sim_1_1_2, sim_1_2_1, sim_2_1_2, sim_2_2_1]).div(
+            self.loss_config.temperature
+        )
+        labels = torch.tile(labels, (4,))
+        loss = self.criterion(logits, labels)
 
         # update queue using only one view, following original authors.
         # gather keys before updating queue /!\ the queue is duplicated on all GPUs
-        proj_1, _ = torch.chunk(proj, 2)
-        proj_1s = concat_all_gather(proj_1.detach())
-        self.queue.dequeue_and_enqueue(proj_1s)
+        if has_pred:
+            proj_1, _ = torch.chunk(proj, 2)
+            proj_1s = concat_all_gather(proj_1.detach())
+            self.queue.dequeue_and_enqueue(proj_1s)
+        else:
+            # pred is proj
+            self.queue.dequeue_and_enqueue(pred_1s)
 
-        return self.criterion(logits, labels)
+        return loss
 
     def __repr__(self):
         repr_dict = {"name": self._get_name()}
