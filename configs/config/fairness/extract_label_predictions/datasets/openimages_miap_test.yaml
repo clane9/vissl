@@ -12,6 +12,7 @@ config:
       BATCHSIZE_PER_REPLICA: 32
       LABEL_TYPE: "zero"
       TRANSFORMS:
+        - name: ImgPilBboxCrop
         - name: Resize
           size: [224, 224]
         - name: ToTensor

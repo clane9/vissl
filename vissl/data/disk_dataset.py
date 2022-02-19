@@ -6,7 +6,6 @@
 import logging
 
 from iopath.common.file_io import g_pathmgr
-from PIL import Image
 from torchvision.datasets import DatasetFolder, ImageFolder
 from vissl.data.data_helper import QueueDataset, get_mean_image, image_loader
 from vissl.utils.io import load_file
@@ -124,19 +123,16 @@ class DiskImageDataset(QueueDataset):
                 self.image_dataset = load_file(path, mmap_mode="r")
             else:
                 self.image_dataset = load_file(path)
-        elif self.data_source == "disk_folder":
-            self.image_dataset = ImageFolder(path)
+        elif self.data_source in ["disk_folder", "disk_video_folder"]:
+            if self.data_source == "disk_folder":
+                self.image_dataset = ImageFolder(path)
+            else:
+                self.image_dataset = VideoFolder(path)
             logging.info(f"Loaded {len(self.image_dataset)} samples from folder {path}")
 
             # mark as initialized.
             # Creating ImageFolder dataset can be expensive because of repeated os.listdir calls
             # Avoid creating it over and over again.
-            self.is_initialized = True
-        elif self.data_source == "disk_video_folder":
-            self.image_dataset = VideoFolder(path)
-            logging.info(
-                f"Loaded {len(self.image_dataset)} video samples from folder {path}"
-            )
             self.is_initialized = True
         elif self.data_source == "disk_roi_annotations":
             # we load the annotations and then parse the image paths and the image roi
@@ -205,25 +201,9 @@ class DiskImageDataset(QueueDataset):
                 img = self.image_dataset[idx][0]
             elif self.data_source == "disk_roi_annotations":
                 image_path = self.image_dataset[idx]
-                with g_pathmgr.open(image_path, "rb") as fopen:
-                    bbox = [float(item) for item in self.image_roi_bbox[idx]]
-                    img = Image.open(fopen).crop(bbox).convert("RGB")
-                # TODO: move the below to a dedicated transform
-                # applicable to openimages dataset only
-                width, height = img.size
-                bbox_size = min(img.size)
-                ratio = max(img.size) / min(img.size)
-                if ratio >= 1.2:
-                    if width < height:  # bigger height
-                        bbox = (0, 0, bbox_size, bbox_size)
-                    else:  # bigger width.
-                        bbox = (
-                            int((width - bbox_size) / 2),
-                            0,
-                            int((width - bbox_size) / 2) + bbox_size,
-                            height,
-                        )
-                    img = img.crop(bbox)
+                img = self._load_image(image_path)
+                bbox = [float(item) for item in self.image_roi_bbox[idx]]
+                img = img.crop(bbox)
             if is_success and self.enable_queue_dataset:
                 self.on_sucess(img)
         except Exception as e:
