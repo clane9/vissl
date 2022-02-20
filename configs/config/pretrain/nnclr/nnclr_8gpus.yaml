@@ -1,0 +1,118 @@
+# @package _global_
+# nnclr 4 node 8 gpu config adapted from simclr_8node_resnet
+config:
+  VERBOSE: False
+  LOG_FREQUENCY: 10
+  TEST_ONLY: False
+  TEST_MODEL: False
+  SEED_VALUE: 0
+  MULTI_PROCESSING_METHOD: forkserver
+  HOOKS:
+    PERF_STATS:
+      MONITOR_PERF_STATS: True
+      ROLLING_BTIME_FREQ: 313
+  DATA:
+    NUM_DATALOADER_WORKERS: 10
+    TRAIN:
+      DATA_SOURCES: [disk_filelist]
+      DATASET_NAMES: [imagenet1k_filelist]
+      BATCHSIZE_PER_REPLICA: 64
+      LABEL_TYPE: sample_index    # just an implementation detail. Label isn't used
+      # TODO: replace with Byol transforms to reproduce paper
+      TRANSFORMS:
+        - name: ImgReplicatePil
+          num_times: 2
+        - name: RandomResizedCrop
+          size: 224
+        - name: RandomHorizontalFlip
+          p: 0.5
+        - name: ImgPilColorDistortion
+          strength: 1.0
+        - name: ImgPilGaussianBlur
+          p: 0.5
+          radius_min: 0.1
+          radius_max: 2.0
+        - name: ToTensor
+        - name: Normalize
+          mean: [0.485, 0.456, 0.406]
+          std: [0.229, 0.224, 0.225]
+      COLLATE_FUNCTION: simclr_collator
+      MMAP_MODE: True
+      COPY_TO_LOCAL_DISK: False
+      COPY_DESTINATION_DIR: /tmp/imagenet1k/
+      DROP_LAST: True
+  TRAINER:
+    TRAIN_STEP_NAME: standard_train_step
+  METERS:
+    name: ""
+  MODEL:
+    TRUNK:
+      NAME: resnet
+      RESNETS:
+        DEPTH: 50
+    HEAD:
+      PARAMS: [
+        # from @OlivierDehaene.
+        ["mlp", {"dims": [2048, 2048, 2048], "use_relu": True, "use_bn": True, "use_bias": False, "skip_last_layer_relu_bn": False}],
+        ["mlp", {"dims": [2048, 256], "use_relu": False, "use_bn": True, "use_bias": False, "skip_last_layer_relu_bn": False}],
+        ["skip_mlp", {"dims": [256, 4096, 256], "use_relu": True, "use_bn": True, "use_bias": True, "skip_last_layer_relu_bn": True}]
+      ]
+    SYNC_BN_CONFIG:
+      CONVERT_BN_TO_SYNC_BN: True
+      SYNC_BN_TYPE: apex
+      # GROUP_SIZE: 8
+      # only 2 gpus per node
+      GROUP_SIZE: 2
+    AMP_PARAMS:
+      USE_AMP: False
+  LOSS:
+    name: nnclr_loss
+  OPTIMIZER:
+      # Authors use LARS. Using SGD to have close comparison with SimCLR in this
+      # small-scale setup.
+      name: sgd
+      # TODO: does using larc make sense with only 8 gpus?
+      use_larc: True
+      larc_config:
+        clip: False
+        trust_coefficient: 0.001
+        eps: 0.00000001
+      weight_decay: 0.000001
+      momentum: 0.9
+      nesterov: False
+      num_epochs: 100
+      # authors don't regularize bias
+      # assuming not bn either (TODO: check)
+      regularize_bn: False
+      regularize_bias: False
+      param_schedulers:
+        lr:
+          auto_lr_scaling:
+            auto_scale: true
+            # authors recommend 0.4 for 100 epoch training schedulea and 0.3 otherwise
+            base_value: 0.4
+            base_lr_batch_size: 256
+          name: composite
+          schedulers:
+            - name: linear
+              start_value: 0.075
+              end_value: 0.8
+            - name: cosine
+              start_value: 0.8
+              end_value: 0.0000
+          update_interval: step
+          interval_scaling: [rescaled, fixed]
+          lengths: [0.1, 0.9]                 # 100ep
+  DISTRIBUTED:
+    BACKEND: nccl
+    NUM_NODES: 4
+    NUM_PROC_PER_NODE: 2
+    RUN_ID: xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    INIT_METHOD: tcp
+    NCCL_DEBUG: True
+  MACHINE:
+    DEVICE: gpu
+  CHECKPOINT:
+    AUTO_RESUME: True
+    CHECKPOINT_FREQUENCY: 10
+    OVERWRITE_EXISTING: true
