@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import logging
 import pprint
 from typing import List, Union
 
@@ -72,6 +73,8 @@ class NNCLRLoss(ClassyLoss):
         else:
             # no prediction head
             pred = proj = output
+
+        logging.info(f"NNCLR loss evaluation. has_pred={has_pred}")
 
         orig_images = proj.shape[0] // 2
         device = proj.device

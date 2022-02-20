@@ -17,6 +17,7 @@ import numpy as np
 import pkg_resources
 import torch
 import torch.multiprocessing as mp
+from classy_vision.generic.distributed_util import is_distributed_training_run
 from iopath.common.file_io import g_pathmgr
 from scipy.sparse import csr_matrix
 from vissl.utils.extract_features_utils import ExtractedFeaturesLoader
@@ -245,10 +246,13 @@ def concat_all_gather(tensor):
     Performs all_gather operation on the provided tensors.
     *** Warning ***: torch.distributed.all_gather has no gradient.
     """
-    tensors_gather = [
-        torch.ones_like(tensor) for _ in range(torch.distributed.get_world_size())
-    ]
-    torch.distributed.all_gather(tensors_gather, tensor, async_op=False)
+    if is_distributed_training_run():
+        tensors_gather = [
+            torch.ones_like(tensor) for _ in range(torch.distributed.get_world_size())
+        ]
+        torch.distributed.all_gather(tensors_gather, tensor, async_op=False)
+    else:
+        tensors_gather = [tensor]
 
     output = torch.cat(tensors_gather, dim=0)
     return output
