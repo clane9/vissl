@@ -47,7 +47,7 @@ class VICRegLoss(ClassyLoss):
 
         # invariance + variance + covariance loss
         loss = (
-            self.loss_config.lambd * mse_loss(z1, z2)
+            self.loss_config.lambda_ * mse_loss(z1, z2)
             + self.loss_config.mu * (var_loss(v1) + var_loss(v2))
             + self.loss_config.nu * (cov_loss(z1, m1) + cov_loss(z2, m2))
         )
@@ -66,7 +66,7 @@ class VICRegLoss(ClassyLoss):
 def sync_mean_var(z: torch.Tensor):
     # synchronized mean, var across replicas with grads
     # NOTE: assuming all replica batch sizes equal
-    mean = z.mean(dim=0).unsqueeze(0)
+    mean = z.mean(dim=0, keepdim=True)
     means = gather_from_all(mean)
     mean = means.mean(dim=0)
 
@@ -74,7 +74,7 @@ def sync_mean_var(z: torch.Tensor):
     world_size = means.shape[0]
     effective_batch_size = world_size * batch_size
 
-    var = (z - mean).pow(2).sum(dim=0)
+    var = (z - mean).pow(2).sum(dim=0, keepdim=True)
     vars = gather_from_all(var)
     var = vars.sum(dim=0).div(effective_batch_size - 1)
     return mean, var

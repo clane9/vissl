@@ -20,6 +20,7 @@ from vissl.losses.cross_entropy_multiple_output_single_target import (
 from vissl.losses.multicrop_simclr_info_nce_loss import MultiCropSimclrInfoNCECriterion
 from vissl.losses.simclr_info_nce_loss import SimclrInfoNCECriterion
 from vissl.losses.swav_loss import SwAVCriterion
+from vissl.losses.vicreg_loss import VICRegLoss
 
 
 logger = logging.getLogger("__name__")
@@ -79,6 +80,12 @@ class TestLossesForward(unittest.TestCase):
             lambda_=0.0051, scale_loss=0.024, embedding_dim=EMBEDDING_DIM
         )
         _ = loss_layer(self._get_embedding())
+
+    def test_vicreg_loss(self):
+        loss_config = AttrDict({"lambda_": 25.0, "mu": 25.0, "nu": 1.0})
+        loss_layer = VICRegLoss(loss_config)
+        embedding = self._get_embedding()
+        _ = loss_layer(embedding)
 
 
 class TestBarlowTwinsCriterion(unittest.TestCase):
@@ -204,10 +211,8 @@ class TestCrossEntropyMultipleOutputSingleTargetLoss(unittest.TestCase):
 
     def test_label_smoothing_target_transformation(self):
         target = torch.tensor([0, 1, 2], dtype=torch.int64)
-        smoothed = (
-            CrossEntropyMultipleOutputSingleTargetCriterion.apply_label_smoothing(
-                target=target, num_labels=4, label_smoothing=0.1
-            )
+        smoothed = CrossEntropyMultipleOutputSingleTargetCriterion.apply_label_smoothing(
+            target=target, num_labels=4, label_smoothing=0.1
         )
         expected = torch.tensor(
             [
