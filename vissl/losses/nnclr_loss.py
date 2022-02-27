@@ -93,6 +93,7 @@ class NNCLRLoss(ClassyLoss):
 
         # gather all outputs, keeping grads for predicitons
         # note all outputs must be gathered, since each term is used as negative examples
+        # TODO: should these communication ops be grouped for less overhead?
         pred_1s = gather_from_all(pred_1)
         pred_2s = gather_from_all(pred_2)
         nbrs_1s = concat_all_gather(nbrs_1)
@@ -134,5 +135,10 @@ class NNCLRLoss(ClassyLoss):
         return loss
 
     def __repr__(self):
-        repr_dict = {"name": self._get_name()}
+        repr_dict = {
+            "name": self._get_name(),
+            "embedding_dim": self.loss_config.embedding_dim,
+            "queue_size": self.loss_config.queue_size,
+            "temperature": self.loss_config.temperature,
+        }
         return pprint.pformat(repr_dict, indent=2)
