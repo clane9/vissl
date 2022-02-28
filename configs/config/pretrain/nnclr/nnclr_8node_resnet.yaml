@@ -1,7 +1,7 @@
 # @package _global_
 config:
   VERBOSE: False
-  LOG_FREQUENCY: 1
+  LOG_FREQUENCY: 10
   TEST_ONLY: False
   TEST_MODEL: False
   SEED_VALUE: 0
@@ -9,15 +9,20 @@ config:
   HOOKS:
     PERF_STATS:
       MONITOR_PERF_STATS: True
-      PERF_STAT_FREQUENCY: 10
-      ROLLING_BTIME_FREQ: 5
+      ROLLING_BTIME_FREQ: 313
   DATA:
     NUM_DATALOADER_WORKERS: 5
     TRAIN:
-      DATA_SOURCES: [disk_filelist]
-      DATASET_NAMES: [imagenet1k_filelist]
-      BATCHSIZE_PER_REPLICA: 32
+      DATA_SOURCES: [disk_folder]
+      DATASET_NAMES: [imagenet1k_folder]
+      BATCHSIZE_PER_REPLICA: 64
       LABEL_TYPE: sample_index    # just an implementation detail. Label isn't used
+      # BYOL Paper - Page 16 - Appendix B
+      # Copied from iseessel:byol-v2
+      # TODO: Authors say they use the BYOL augmentation scheme, but give no
+      # other details. Unclear to me whether they use both augmentation
+      # pipelines, or one or the other. Assuming both, which is most literal
+      # interpretation.
       TRANSFORMS:
         - name: ImgReplicatePil
           num_times: 2
@@ -26,11 +31,20 @@ config:
         - name: RandomHorizontalFlip
           p: 0.5
         - name: ImgPilColorDistortion
-          strength: 1.0
-        - name: ImgPilGaussianBlur
-          p: 0.5
-          radius_min: 0.1
-          radius_max: 2.0
+          # TODO: fix saturation
+          strength: 0.5
+        - name: ImgPilMultiCropRandomApply
+          transforms:
+            - name: ImgPilGaussianBlur
+              p: 1
+              radius_min: 0.1
+              radius_max: 2.0
+          prob: [1.0, 0.1]
+        - name: ImgPilMultiCropRandomApply
+          transforms:
+            - name: ImgPilRandomSolarize
+              p: 1.0
+          prob: [0.0, 0.2]
         - name: ToTensor
         - name: Normalize
           mean: [0.485, 0.456, 0.406]
@@ -38,9 +52,8 @@ config:
       COLLATE_FUNCTION: simclr_collator
       MMAP_MODE: True
       COPY_TO_LOCAL_DISK: False
-      DATA_LIMIT: 500
+      COPY_DESTINATION_DIR: /tmp/imagenet1k/
       DROP_LAST: True
-      COPY_DESTINATION_DIR: "/tmp/imagenet1k"
   TRAINER:
     TRAIN_STEP_NAME: standard_train_step
   METERS:
@@ -59,10 +72,10 @@ config:
       ]
     SYNC_BN_CONFIG:
       CONVERT_BN_TO_SYNC_BN: True
-      SYNC_BN_TYPE: pytorch
+      SYNC_BN_TYPE: apex
+      GROUP_SIZE: 8
     AMP_PARAMS:
       USE_AMP: False
-      AMP_ARGS: {"opt_level": "O3", "keep_batchnorm_fp32": True, "master_weights": True, "loss_scale": "dynamic"}
   LOSS:
     name: nnclr_loss
     nnclr_loss:
@@ -75,7 +88,7 @@ config:
       weight_decay: 1.0e-6
       momentum: 0.9
       nesterov: False
-      num_epochs: 2
+      num_epochs: 1000
       regularize_bn: False
       regularize_bias: False
       exclude_bias_and_norm: True
@@ -85,20 +98,27 @@ config:
             auto_scale: true
             base_value: 0.3
             base_lr_batch_size: 256
-          name: cosine
-          start_value: 0.3
-          end_value: 0.0000
+          name: composite
+          schedulers:
+            - name: linear
+              start_value: 0.6
+              end_value: 4.8
+            - name: cosine
+              start_value: 4.8
+              end_value: 0.0000
           update_interval: step
+          interval_scaling: [rescaled, fixed]
+          lengths: [0.01, 0.99] # 10ep
   DISTRIBUTED:
     BACKEND: nccl
-    NUM_NODES: 1
-    NUM_PROC_PER_NODE: 1
+    NUM_NODES: 8
+    NUM_PROC_PER_NODE: 8
+    RUN_ID: xxxxxxxxxxxxxxxxxxxxxxxxxxxx
     INIT_METHOD: tcp
-    RUN_ID: auto
+    NCCL_DEBUG: True
   MACHINE:
     DEVICE: gpu
   CHECKPOINT:
-    DIR: "."
     AUTO_RESUME: True
-    CHECKPOINT_FREQUENCY: 1
-    OVERWRITE_EXISTING: true
+    CHECKPOINT_FREQUENCY: 5
+    CHECKPOINT_ITER_FREQUENCY: -1  # set this variable to checkpoint every few iterations

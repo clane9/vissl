@@ -1,5 +1,6 @@
 # @package _global_
-# nnclr 4 node 8 gpu config adapted from simclr_8node_resnet
+# NNCLR 4 node 8 gpu config adapted from simclr_8node_resnet
+# Note, this config is intended to be a close comparison with SimCLR, not a replication
 config:
   VERBOSE: False
   LOG_FREQUENCY: 10
@@ -12,13 +13,12 @@ config:
       MONITOR_PERF_STATS: True
       ROLLING_BTIME_FREQ: 313
   DATA:
-    NUM_DATALOADER_WORKERS: 10
+    NUM_DATALOADER_WORKERS: 5
     TRAIN:
-      DATA_SOURCES: [disk_filelist]
-      DATASET_NAMES: [imagenet1k_filelist]
+      DATA_SOURCES: [disk_folder]
+      DATASET_NAMES: [imagenet1k_folder]
       BATCHSIZE_PER_REPLICA: 64
       LABEL_TYPE: sample_index    # just an implementation detail. Label isn't used
-      # TODO: replace with Byol transforms to reproduce paper
       TRANSFORMS:
         - name: ImgReplicatePil
           num_times: 2
@@ -67,6 +67,10 @@ config:
       USE_AMP: False
   LOSS:
     name: nnclr_loss
+    nnclr_loss:
+      embedding_dim: 256
+      queue_size: 98304
+      temperature: 0.1
   OPTIMIZER:
       # Authors use LARS. Using SGD to have close comparison with SimCLR in this
       # small-scale setup.
@@ -81,8 +85,6 @@ config:
       momentum: 0.9
       nesterov: False
       num_epochs: 100
-      # authors don't regularize bias
-      # assuming not bn either (TODO: check)
       regularize_bn: False
       regularize_bias: False
       param_schedulers:

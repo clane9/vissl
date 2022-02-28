@@ -27,11 +27,6 @@ class NNCLRLoss(ClassyLoss):
         embedding_dim (int): head output output dimension
         queue_size (int): number of elements in queue
         temperature (float): temperature to use on the logits
-
-    NOTE: A natural generalization might be to generate more diverse neighbors
-    with random walks on the nearest neighbor graph. Although this is similar to
-    the nn k > 1 variants the authors test in Table 7 (b), which seemed to have
-    worse performance.
     """
 
     def __init__(self, config: AttrDict):

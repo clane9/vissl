@@ -22,6 +22,7 @@ CFG_LIST=(
     "test/integration_test/quick_simclr_multicrop"
     "test/integration_test/quick_simclr_regnet"
     "test/integration_test/quick_swav"
+    "test/integration_test/quick_nnclr"
 )
 
 echo "========================================================================"
