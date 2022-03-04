@@ -81,6 +81,5 @@ class ImgPilColorDistortion(ClassyTransform):
         Returns:
             ImgPilColorDistortion instance.
         """
-        strength = config.get("strength", 1.0)
-        logging.info(f"ImgPilColorDistortion | Using strength: {strength}")
-        return cls(strength=strength)
+        logging.info(f"ImgPilColorDistortion | Using config: {config}")
+        return cls(**config)
