@@ -15,7 +15,14 @@ from vissl.utils.distributed_utils import gather_from_all
 @register_loss("vicreg_loss")
 class VICRegLoss(ClassyLoss):
     """
-    VICReg Loss.
+    This is the loss proposed for VICReg in https://arxiv.org/pdf/2105.04906.pdf. See
+    the paper and the official code at https://github.com/facebookresearch/vicreg for
+    details.
+
+    Config params:
+        sim_coeff (float): Invariance regularization loss coefficient
+        std_coeff (float): Variance regularization loss coefficient
+        cov_coeff (float): Covariance regularization loss coefficient
     """
 
     def __init__(self, config: AttrDict):
@@ -36,64 +43,49 @@ class VICRegLoss(ClassyLoss):
         return cls(loss_config)
 
     def forward(self, output: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        # see Algorithm 1 in https://arxiv.org/pdf/2105.04906.pdf
-        # copied verbatim
-        z1, z2 = torch.chunk(output, 2)
+        # copied from https://github.com/facebookresearch/vicreg/blob/main/main_vicreg.py
+        # see also Algorithm 1 in https://arxiv.org/pdf/2105.04906.pdf
 
-        # global mean and variance across replicas, similar to SyncBatchNorm
-        # TODO: check carefully
-        m1, v1 = sync_mean_var(z1)
-        m2, v2 = sync_mean_var(z2)
+        x, y = torch.chunk(output, 2)
 
-        # invariance + variance + covariance loss
+        repr_loss = F.mse_loss(x, y)
+
+        # synchronize across replicas, since var, cov loss not batch separable
+        x = gather_from_all(x)
+        y = gather_from_all(y)
+
+        x = x - x.mean(dim=0)
+        y = y - y.mean(dim=0)
+
+        std_x = torch.sqrt(x.var(dim=0) + 0.0001)
+        std_y = torch.sqrt(y.var(dim=0) + 0.0001)
+        std_loss = torch.mean(F.relu(1 - std_x)) / 2 + torch.mean(F.relu(1 - std_y)) / 2
+
+        batch_size, num_features = x.shape
+        cov_x = (x.T @ x) / (batch_size - 1)
+        cov_y = (y.T @ y) / (batch_size - 1)
+        cov_loss_x = off_diagonal(cov_x).pow_(2).sum().div(num_features)
+        cov_loss_y = off_diagonal(cov_y).pow_(2).sum().div(num_features)
+        cov_loss = cov_loss_x + cov_loss_y
+
         loss = (
-            self.loss_config.lambda_ * mse_loss(z1, z2)
-            + self.loss_config.mu * (var_loss(v1) + var_loss(v2))
-            + self.loss_config.nu * (cov_loss(z1, m1) + cov_loss(z2, m2))
+            self.loss_config.sim_coeff * repr_loss
+            + self.loss_config.std_coeff * std_loss
+            + self.loss_config.cov_coeff * cov_loss
         )
         return loss
 
     def __repr__(self):
         repr_dict = {
             "name": self._get_name(),
-            "lambda_": self.loss_config.lambda_,
-            "mu": self.loss_config.mu,
-            "nu": self.loss_config.nu,
+            "sim_coeff": self.loss_config.sim_coeff,
+            "std_coeff": self.loss_config.std_coeff,
+            "cov_coeff": self.loss_config.cov_coeff,
         }
         return pprint.pformat(repr_dict, indent=2)
 
 
-def sync_mean_var(z: torch.Tensor):
-    # synchronized mean, var across replicas with grads
-    # NOTE: assuming all replica batch sizes equal
-    mean = z.mean(dim=0, keepdim=True)
-    means = gather_from_all(mean)
-    mean = means.mean(dim=0)
-
-    batch_size = z.shape[0]
-    world_size = means.shape[0]
-    effective_batch_size = world_size * batch_size
-
-    var = (z - mean).pow(2).sum(dim=0, keepdim=True)
-    vars = gather_from_all(var)
-    var = vars.sum(dim=0).div(effective_batch_size - 1)
-    return mean, var
-
-
-def mse_loss(z1: torch.Tensor, z2: torch.Tensor):
-    return (z1 - z2).pow(2).sum(dim=1).mean()
-
-
-def var_loss(var: torch.Tensor):
-    std = torch.sqrt(var + 1e-4)
-    return F.relu(1 - std).mean()
-
-
-def cov_loss(z: torch.Tensor, mean: torch.Tensor):
-    n, d = z.shape
-    z = z - mean
-    # TODO: don't think we need to sync cov since the loss is batch separable
-    # but check to be sure
-    cov = (z.T @ z) / (n - 1)
-    cov = cov - cov.diag().diag()
-    return cov.pow(2).sum().div(d)
+def off_diagonal(x: torch.Tensor):
+    n, m = x.shape
+    assert n == m
+    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()

@@ -22,22 +22,28 @@ config:
           num_times: 2
         - name: RandomResizedCrop
           size: 224
+          interpolation: 3
         - name: RandomHorizontalFlip
           p: 0.5
-          # FIXME: using wrong saturation.
-          # Authors used ColorJitter(0.4, 0.4, 0.2, 0.1) (appendix C.1)
         - name: ImgPilColorDistortion
           strength: 0.5
-        - name: ImgPilGaussianBlur
-          p: 0.5
-          radius_min: 0.1
-          radius_max: 2.0
-        - name: ImgPilRandomSolarize
-          p: 0.1
+          saturation: 0.4
+        - name: ImgPilMultiCropRandomApply
+          transforms:
+            - name: ImgPilGaussianBlur
+              p: 1
+              radius_min: 0.1
+              radius_max: 2.0
+          prob: [ 1.0, 0.1 ]
+        - name: ImgPilMultiCropRandomApply
+          transforms:
+            - name: ImgPilRandomSolarize
+              p: 1.0
+          prob: [ 0.0, 0.2 ]
         - name: ToTensor
         - name: Normalize
-          mean: [0.485, 0.456, 0.406]
-          std: [0.229, 0.224, 0.225]
+          mean: [ 0.485, 0.456, 0.406 ]
+          std: [ 0.229, 0.224, 0.225 ]
       COLLATE_FUNCTION: simclr_collator
       MMAP_MODE: True
       COPY_TO_LOCAL_DISK: False
@@ -54,12 +60,13 @@ config:
         DEPTH: 50
     HEAD:
       PARAMS: [
-        ["mlp", {"dims": [2048, 8192, 8192, 8192], "use_bn": True, "use_relu": True, "skip_last_layer_relu_bn": True}],
+        ["mlp", {"dims": [2048, 8192, 8192], "use_bias": True, "use_bn": True, "use_relu": True, "skip_last_layer_relu_bn": False}],
+        ["mlp", {"dims": [8192, 8192], "use_bias": False, "use_bn": False, "use_relu": False}],
       ]
     SYNC_BN_CONFIG:
       CONVERT_BN_TO_SYNC_BN: True
       SYNC_BN_TYPE: apex
-      GROUP_SIZE: 2  # 2 gpus per node
+      GROUP_SIZE: 8
     AMP_PARAMS:
       USE_AMP: False
       # USE_AMP: True
@@ -67,53 +74,44 @@ config:
   LOSS:
       name: vicreg_loss
       vicreg_loss:
-        lambda_: 25.0
-        mu: 25.0
-        nu: 1.0
+        sim_coeff: 25.0
+        std_coeff: 25.0
+        cov_coeff: 1.0
   OPTIMIZER:
       name: lars
       weight_decay: 1.0e-6
+      eta: 0.001
       momentum: 0.9
-      # TODO: check these params
       nesterov: False
       regularize_bn: False
       regularize_bias: False
       exclude_bias_and_norm: True
       num_epochs: 100
-      # num_epochs: 200
-      # num_epochs: 400
-      # num_epochs: 500
-      # num_epochs: 600
-      # num_epochs: 800
-      # num_epochs: 1000
       param_schedulers:
         lr:
           auto_lr_scaling:
             auto_scale: true
-            base_value: 0.4
+            base_value: 0.3
             base_lr_batch_size: 256
           name: composite
-          # TODO: check that this schedule gives the correct behavior
+          # authors use linear scaling from 0 to target lr over first 10 epochs, then
+          # cosine decay to 0.001 * target lr.
+          # TODO: will these schedulers reproduce that behavior?
+          # https://github.com/facebookresearch/vicreg/blob/main/main_vicreg.py#L167
           schedulers:
-            - name: cosine
+            - name: linear
               start_value: 0.0
-              end_value: 0.8
+              end_value: 0.6
             - name: cosine
-              start_value: 0.8
-              end_value: 0.002
+              start_value: 0.6
+              end_value: 0.0006
           update_interval: step
           interval_scaling: [rescaled, fixed]
-          lengths: [0.1, 0.9]               # 100ep
-          # lengths: [0.05, 0.95]             # 200ep
-          # lengths: [0.025, 0.975]           # 400ep
-          # lengths: [0.02, 0.98]             # 500ep
-          # lengths: [0.0166667, 0.9833333]   # 600ep
-          # lengths: [0.0125, 0.9875]         # 800ep
-          # lengths: [0.01, 0.99]               # 1000ep
+          lengths: [0.1, 0.9]
   DISTRIBUTED:
     BACKEND: nccl
-    NUM_NODES: 4
-    NUM_PROC_PER_NODE: 2
+    NUM_NODES: 1
+    NUM_PROC_PER_NODE: 8
     RUN_ID: xxxxxxxxxxxxxxxxxxxxxxxxxxxx
     INIT_METHOD: tcp
     NCCL_DEBUG: True
@@ -121,5 +119,5 @@ config:
     DEVICE: gpu
   CHECKPOINT:
     AUTO_RESUME: True
-    CHECKPOINT_FREQUENCY: 10
+    CHECKPOINT_FREQUENCY: 5
     CHECKPOINT_ITER_FREQUENCY: -1  # set this variable to checkpoint every few iterations

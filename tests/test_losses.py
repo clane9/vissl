@@ -82,7 +82,7 @@ class TestLossesForward(unittest.TestCase):
         _ = loss_layer(self._get_embedding())
 
     def test_vicreg_loss(self):
-        loss_config = AttrDict({"lambda_": 25.0, "mu": 25.0, "nu": 1.0})
+        loss_config = AttrDict({"sim_coeff": 25.0, "std_coeff": 25.0, "cov_coeff": 1.0})
         loss_layer = VICRegLoss(loss_config)
         embedding = self._get_embedding()
         _ = loss_layer(embedding)
