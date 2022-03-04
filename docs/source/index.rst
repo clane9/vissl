@@ -65,6 +65,7 @@ from designing a new self-supervised task to evaluating the learned representati
    ssl_approaches/dino
    ssl_approaches/vision_transformers
    ssl_approaches/barlow_twins
+   ssl_approaches/vicreg
 
 
 .. toctree::
